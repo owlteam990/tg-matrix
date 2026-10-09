@@ -1,0 +1,18 @@
+:root {
+  --color-bg: #ffffff;
+  --color-bg-sidebar: #f7f7f7;
+  --color-bg-rail: #2e2e2e;
+  --color-bg-hover: #ededed;
+  --color-bg-selected: #e7f8ef;
+  --color-primary: #07c160;
+  --color-primary-hover: #06ad56;
+  --color-text: #191919;
+  --color-text-secondary: #888888;
+  --color-text-on-dark: #ffffff;
+  --color-border: #e5e5e5;
+  --color-danger: #fa5151;
+  --color-warning: #ffc300;
+  --rail-width: 64px;
+  --mid-width: 280px;
+  --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}

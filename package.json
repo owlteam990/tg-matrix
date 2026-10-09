@@ -1,0 +1,13 @@
+{
+  "name": "tg-matrix",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "sidecar:build": "cd services/sidecar && go build -o bin/tg-sidecar ./cmd/sidecar",
+    "sidecar:dev": "cd services/sidecar && GOPROXY=${GOPROXY:-https://goproxy.io,direct} GOSUMDB=${GOSUMDB:-off} TG_SIDECAR_DATA=../../.data go run ./cmd/sidecar",
+    "desktop:dev": "npm --prefix apps/desktop run dev",
+    "desktop:build": "npm --prefix apps/desktop run build",
+    "dev": "echo '请分别开两个终端：npm run sidecar:dev 与 npm run desktop:dev'"
+  }
+}

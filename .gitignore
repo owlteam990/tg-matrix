@@ -1,0 +1,101 @@
+# ===== 依赖 =====
+node_modules/
+.pnpm-store/
+.npm/
+apps/**/node_modules/
+
+# ===== 编译 / 构建产物 =====
+dist/
+build/
+out/
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.o
+*.app
+*.dmg
+*.pkg
+*.msi
+apps/desktop/dist/
+services/sidecar/bin/
+services/sidecar/tg-sidecar
+**/target/
+
+# ===== Go =====
+.gocache/
+.deps/
+vendor/
+*.test
+*.out
+coverage.out
+coverage.html
+cpu.prof
+mem.prof
+
+# ===== 运行时数据 / 本地库 =====
+.data/
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+app.json
+sessions/
+*.session
+*.session.json
+
+# ===== 日志 / 临时文件 =====
+*.log
+*.log.*
+logs/
+tmp/
+temp/
+.tmp/
+.temp/
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+.cache/
+
+# ===== 环境 / 密钥（勿入库） =====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials.json
+
+# ===== 系统 / IDE =====
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.code-workspace
+.history/
+.cursor/
+!.cursor/rules/
+
+# ===== 测试 / 覆盖率杂项 =====
+.nyc_output/
+.coverage/
+htmlcov/
+.pytest_cache/
+.tox/
+
+# ===== 其他 =====
+*.pid
+*.seed
+.turbo/
+.parcel-cache/
+.vite/
