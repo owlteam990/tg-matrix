@@ -53,6 +53,14 @@ if ($Help) {
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $Root
 
+# GitHub Actions / cp1252 控制台：避免 Python print 中文报 UnicodeEncodeError
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
+try {
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+    $OutputEncoding = [System.Text.UTF8Encoding]::new()
+} catch {}
+
 if (-not $env:GOPROXY) { $env:GOPROXY = "https://goproxy.io,direct" }
 if (-not $env:GOSUMDB) { $env:GOSUMDB = "off" }
 $GoCacheMod = Join-Path $Root ".gocache\mod"
@@ -244,7 +252,7 @@ text2, n = re.subn(r'(?m)^version\s*=\s*"[^"]*"', f'version = "{ver}"', text, co
 if n != 1:
     raise SystemExit(f"Cargo.toml 未能更新 version: {cargo}")
 cargo.write_text(text2, encoding="utf-8")
-print(f"已写入版本 {ver}")
+print("wrote version", ver)
 '@
     Invoke-PythonScript -Code $code -ScriptArgs @($Ver, $TauriConf, $DesktopPkg, $RootPkg, $CargoToml)
 }
@@ -276,17 +284,24 @@ function Test-WixAvailable {
 
 function Ensure-BundleTargets {
     $targets = @()
-    if (Test-NsisAvailable) {
-        $targets += "nsis"
+    # CI 可设 TG_RELEASE_TARGETS=nsis（逗号分隔），避免缺 WiX 时踩坑
+    if ($env:TG_RELEASE_TARGETS) {
+        $targets = @($env:TG_RELEASE_TARGETS.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        Write-Host ("TG_RELEASE_TARGETS -> " + ($targets -join ","))
     }
     else {
-        Write-Host "!! 未检测到 NSIS(makensis)，本次不打 .exe 安装包" -ForegroundColor Yellow
-    }
-    if (Test-WixAvailable) {
-        $targets += "msi"
-    }
-    else {
-        Write-Host "!! 未检测到 WiX，本次不打 .msi；可只依赖 NSIS 或稍后补装 WiX" -ForegroundColor Yellow
+        if (Test-NsisAvailable) {
+            $targets += "nsis"
+        }
+        else {
+            Write-Host "!! 未检测到 NSIS(makensis)，本次不打 .exe 安装包" -ForegroundColor Yellow
+        }
+        if (Test-WixAvailable) {
+            $targets += "msi"
+        }
+        else {
+            Write-Host "!! 未检测到 WiX，本次不打 .msi；可只依赖 NSIS 或稍后补装 WiX" -ForegroundColor Yellow
+        }
     }
     if ($targets.Count -eq 0) {
         # 至少让 tauri 产出可执行文件；安装包后补
@@ -312,10 +327,10 @@ if bundle.get("resources") != want_resources:
     changed = True
 if changed:
     conf_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"已更新 bundle.targets -> {bundle['targets']}")
-    print(f"已更新 bundle.resources -> {bundle['resources']}")
+    print("updated bundle.targets ->", bundle["targets"])
+    print("updated bundle.resources ->", bundle["resources"])
 else:
-    print(f"bundle.targets / resources 已是 {want_targets}")
+    print("bundle.targets / resources already", want_targets)
 '@
     Invoke-PythonScript -Code $code -ScriptArgs @($TauriConf, $targetsCsv)
 }
@@ -492,15 +507,15 @@ manifest = {
     "forceUpdate": False,
     "downloadUrl": f"https://cdn.example.com/{primary}" if primary else "",
     "releaseNotes": f"TG Matrix {ver}",
-    "supportContact": "@maotouying_cc",
+    "supportContact": "https://github.com/owlteam990/tg-matrix/issues",
     "publishedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    "_note": "上传安装包到 CDN 后，把 downloadUrl 换成真实 HTTPS 直链，再写入工厂更新接口（见 docs/更新.md）",
+    "_note": "Set downloadUrl to the GitHub Release asset URL",
 }
 Path(out, "update-manifest.example.json").write_text(
     json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
     encoding="utf-8",
 )
-print("已写 update-manifest.example.json")
+print("wrote update-manifest.example.json")
 '@
     Invoke-PythonScript -Code $code -ScriptArgs @($out, $Ver, $PLATFORM, $primary)
 
