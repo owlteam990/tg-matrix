@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-save-text-file"
+description = "允许将文本保存到用户在另存为对话框中选择的本地路径"
+commands.allow = ["save_text_file"]

@@ -4,10 +4,16 @@
   "version": "0.1.0",
   "scripts": {
     "build": "bash scripts/build.sh",
-    "sidecar:build": "cd services/sidecar && go build -o bin/tg-sidecar ./cmd/sidecar",
+    "build:app": "bash scripts/build.sh app",
+    "release": "bash scripts/release.sh",
+    "release:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1",
+    "setup:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-win.ps1",
+    "pack:win-source": "bash scripts/pack-win-source.sh",
+    "sidecar:build": "bash scripts/build.sh sidecar",
+    "sidecar:restart": "bash scripts/build.sh restart",
     "sidecar:dev": "cd services/sidecar && GOPROXY=${GOPROXY:-https://goproxy.io,direct} GOSUMDB=${GOSUMDB:-off} TG_SIDECAR_DATA=../../.data go run ./cmd/sidecar",
-    "desktop:dev": "npm --prefix apps/desktop run dev",
+    "desktop:dev": "npm --prefix apps/desktop run tauri:dev",
     "desktop:build": "npm --prefix apps/desktop run build",
-    "dev": "echo '请分别开两个终端：npm run sidecar:dev 与 npm run desktop:dev'"
+    "dev": "echo '先 npm run sidecar:restart，再 npm run desktop:dev（原生窗口）'"
   }
 }

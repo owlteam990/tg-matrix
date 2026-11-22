@@ -1,74 +1,120 @@
-# TG 多帐号管理（tg-matrix）
+# TG Matrix
 
-本地多协议号 Telegram 操作工具（Win / mac）。
+**开源、免费、纯本地的 Telegram 多协议号桌面工具。**  
+一套界面管理多个协议号：导入会话、绑代理、私信/群组/联系人/采集与任务队列——数据只留在你的电脑上。
+
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-owlteam990%2Ftg-matrix-181717?logo=github)](https://github.com/owlteam990/tg-matrix)
+
+> **无注册、无登录、无云端许可、无积分扣费。**  
+> 协议号会话、代理、任务与本地库全部保存在本机；本仓库不连接任何自有云端账号或计费接口。
 
 ## 技术栈
 
-- 桌面 UI：Vue 3 + TypeScript + Vite（微信风三栏壳；Tauri 2 封装后续接入）
-- Sidecar：Go + **modernc.org/sqlite** + **gotd**（一协议号一 Client，可按号绑代理）
-- 交互：`docs/Interaction-Logic.md`
+| 层 | 技术 |
+|---|---|
+| 桌面壳 | Tauri 2 + Vue 3 + TypeScript |
+| 本地服务 | Go sidecar + SQLite + [gotd](https://github.com/gotd/td)（一协议号一 Client，可按号绑代理） |
+
+## 核心能力
+
+- **协议号池**：导入 `.session` + `.json`（或 session_string），按号绑定 HTTP/SOCKS 代理
+- **消息**：会话列表、历史、收发；群发支持多号策略与多文案轮换
+- **群组 / 联系人**：加退群、邀请、通讯录；已加入群与通讯录可按协议号缓存在本地
+- **采集**：群成员 / 发言者采集、手机号检查
+- **营销流水线（手工）**：产品库 → 线索 → 手动写话术 → 入队限速发送
+- **任务中心**：批量任务进度、取消、断点相关状态
+
+开源版**不含**云端 AI（适配分析 / 自动话术 / 会话 AI 回复）。相关按钮会提示自行编写文案；欢迎社区以自备模型 Key 等方式贡献扩展。
+
 ## 目录
 
 ```text
-apps/desktop/          # 前端三栏壳
-services/sidecar/      # 本地服务
-docs/                  # 需求与计划
+apps/desktop/          # Vue UI + Tauri 原生壳
+services/sidecar/      # 本地 Go 服务（127.0.0.1）
+scripts/               # 编译 / 发版脚本
+docs/                  # 交互说明与打包备忘（部分为本地笔记）
 ```
 
-## 编译
+## 快速开始（开发）
 
-需安装：Node.js 20+、Go 1.22+。
+需安装：Node.js 20+、Go 1.22+、Rust（cargo）。
 
 ```bash
-# 编译当前平台 sidecar + 桌面前端 → dist/
-./scripts/build.sh
-# 或
-npm run build
+# 1) 编译并重启本地 sidecar
+npm run sidecar:restart
 
-# 同时交叉编译 darwin/amd64、darwin/arm64、windows/amd64
-BUILD_CROSS=1 ./scripts/build.sh
+# 2) 原生窗口开发（热更新前端）
+npm run desktop:dev
+# 或：cd apps/desktop && npm run tauri:dev
 ```
 
-产物：
-
-- `dist/sidecar/tg-sidecar`（当前平台二进制）
-- `dist/desktop/`（静态前端）
-
-## 本地开发
+可选环境变量（Telegram API 凭据，自备）：
 
 ```bash
-# 终端 1：sidecar（可选配置 Telegram API，用于 gotd 检查）
 export TG_APP_ID=你的api_id
 export TG_APP_HASH=你的api_hash
-npm run sidecar:dev
-
-# 终端 2：桌面 UI
-cd apps/desktop && npm install && npm run dev
 ```
 
-默认 sidecar：`http://127.0.0.1:17888`  
-
-| 接口 | 说明 |
-|---|---|
-| `GET /health` | `store=sqlite`，`gotdConfigured` |
-| `GET /v1/accounts` | 协议号列表 |
-| `POST /v1/accounts/{id}/check` | gotd 授权检查（需配置 API 与已有 session） |
-
-数据目录默认 `~/.tg-matrix`；开发脚本使用仓库内 `.data/`（`app.db`）。
+Sidecar 默认：`http://127.0.0.1:17888`（仅本机）。
 
 拉 Go 依赖若遇代理问题：
 
 ```bash
 export GOPROXY=https://goproxy.io,direct
 export GOSUMDB=off
-export GOMODCACHE="$PWD/.gocache/mod"
 ```
 
-## 当前进度（P1）
+## 编译桌面 App
 
-- [x] Sidecar health / accounts
-- [x] SQLite + gotd 接入
-- [x] 微信风三栏 UI + 连通状态
-- [ ] Tauri 2 打包壳
-- [ ] Session 导入与按协议号代理绑定
-- [ ] 账号检查 UI 联调
+```bash
+./scripts/build.sh app
+# 或
+npm run build:app
+```
+
+产物在 `dist/app/*.app`（macOS）。
+
+## 打正式 Release 包
+
+### macOS
+
+```bash
+TG_RELEASE_SKIP_SIGN=1 ./scripts/release.sh
+# 升版本
+TG_RELEASE_SKIP_SIGN=1 ./scripts/release.sh 0.2.0
+```
+
+产物在 `dist/release/vX.Y.Z/`。外发签名见 `scripts/release.sh` 头部注释。
+
+### Windows（须在 Windows 本机）
+
+详见 [`docs/Windows打包.md`](docs/Windows打包.md)。
+
+```bash
+# 在 mac 上导出给 Windows 的源码 zip
+./scripts/pack-win-source.sh
+```
+
+目标机建议 x64 Windows：
+
+```bat
+scripts\setup-win.cmd
+scripts\release-win.cmd
+```
+
+## 本地数据
+
+打包 App 的数据目录约在（macOS）：
+
+`~/Library/Application Support/local.tgmatrix.app`
+
+开发态可用仓库下 `.data/`（已在 `.gitignore` 中忽略）。
+
+## 许可证
+
+[Apache License 2.0](./LICENSE)。可商用；修改与再分发请保留版权与许可证声明，详见 [NOTICE](./NOTICE)。
+
+## 免责声明
+
+本项目仅供学习与自用运维辅助。请遵守 Telegram 服务条款与当地法律法规；滥用批量行为可能导致账号限制，风险自负。

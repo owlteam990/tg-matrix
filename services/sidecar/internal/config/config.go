@@ -12,6 +12,10 @@ type Config struct {
 	Addr string
 	// DataDir 本地数据根目录（SQLite、session 等）
 	DataDir string
+	// WebDir 前端静态资源目录（可空）
+	WebDir string
+	// OpenBrowser 启动后是否打开系统浏览器
+	OpenBrowser bool
 	// AppID Telegram API ID
 	AppID int
 	// AppHash Telegram API Hash
@@ -42,14 +46,29 @@ func Load() Config {
 		dataDir = filepath.Join(home, ".tg-matrix")
 	}
 
-	// 3. Telegram API 凭证（未配置时 gotd 业务调用不可用，健康检查仍可用）
+	// 3. 静态前端目录：环境变量优先，否则尝试可执行文件旁 web/
+	webDir := os.Getenv("TG_WEB_DIR")
+	if webDir == "" {
+		if exe, err := os.Executable(); err == nil {
+			candidate := filepath.Join(filepath.Dir(exe), "web")
+			if st, err := os.Stat(candidate); err == nil && st.IsDir() {
+				webDir = candidate
+			}
+		}
+	}
+
+	// 4. Telegram API 凭证（未配置时 gotd 业务调用不可用，健康检查仍可用）
 	appID, _ := strconv.Atoi(os.Getenv("TG_APP_ID"))
 	appHash := os.Getenv("TG_APP_HASH")
 
+	openBrowser := os.Getenv("TG_OPEN_BROWSER") == "1" || os.Getenv("TG_OPEN_BROWSER") == "true"
+
 	return Config{
-		Addr:    addr,
-		DataDir: dataDir,
-		AppID:   appID,
-		AppHash: appHash,
+		Addr:        addr,
+		DataDir:     dataDir,
+		WebDir:      webDir,
+		OpenBrowser: openBrowser,
+		AppID:       appID,
+		AppHash:     appHash,
 	}
 }

@@ -5,6 +5,8 @@ export type ModuleKey =
   | 'groups'
   | 'contacts'
   | 'scrape'
+  | 'marketing'
+  | 'send_queue'
   | 'tasks'
   | 'settings'
 
@@ -22,6 +24,8 @@ const items: { key: ModuleKey; label: string }[] = [
   { key: 'groups', label: '群组' },
   { key: 'contacts', label: '联系人' },
   { key: 'scrape', label: '采集' },
+  { key: 'marketing', label: '营销' },
+  { key: 'send_queue', label: '队列' },
   { key: 'tasks', label: '任务' },
   { key: 'settings', label: '设置' },
 ]
