@@ -122,6 +122,12 @@ git push origin v0.1.0
 
 开发态可用仓库下 `.data/`（已在 `.gitignore` 中忽略）。
 
+## 联系方式
+
+需要**定制功能**或**二次开发**，欢迎联系我们：
+
+- Telegram：[@maotouying_cc](https://t.me/maotouying_cc)
+
 ## 许可证
 
 [Apache License 2.0](./LICENSE)。可商用；修改与再分发请保留版权与许可证声明，详见 [NOTICE](./NOTICE)。
