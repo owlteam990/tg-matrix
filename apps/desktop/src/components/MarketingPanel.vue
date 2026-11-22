@@ -18,7 +18,6 @@ import {
   type MarketingSendJob,
   type MarketingSendPolicy,
 } from '../api/sidecar'
-import { OSS_AI_DISABLED } from '../lib/ossNotice'
 import { loadSettings } from '../lib/settings'
 
 const props = defineProps<{
@@ -60,11 +59,7 @@ const statusFilter = ref('')
 /** 有选中目标群时，默认只看该群线索 */
 const onlyCurrentGroup = ref(true)
 const selectedLeadIds = ref<string[]>([])
-const minFitScore = ref(50)
 const leadsRefreshing = ref(false)
-/** AI 批量任务进行中（不阻塞采集/刷新） */
-const aiBusy = ref(false)
-const aiBusyKind = ref<'analyze' | 'script' | ''>('')
 
 /** 发送策略选用与队列（策略 CRUD 在设置页） */
 const sendPolicies = ref<MarketingSendPolicy[]>([])
@@ -102,13 +97,13 @@ const filteredLeads = computed(() => {
   return list
 })
 
-/** WebView 本地缓存键（SQLite 落库失败时仍可展示 AI 结果） */
+/** WebView 本地缓存键（SQLite 落库失败时仍可展示线索字段） */
 function leadCacheStorageKey(productId: string): string {
   return `tg-matrix:mkt-lead-ai:${productId}`
 }
 
 /**
- * 读取产品下线索 AI 结果缓存。
+ * 读取产品下线索本地缓存。
  *
  * @param productId 产品 ID
  */
@@ -126,7 +121,7 @@ function readLeadAiCache(productId: string): Record<string, Partial<MarketingLea
 }
 
 /**
- * 写入单条线索 AI 结果到 localStorage。
+ * 写入单条线索字段到 localStorage。
  *
  * @param productId 产品 ID
  * @param lead 线索（取适配/话术字段）
@@ -173,7 +168,7 @@ function mergeLeadsWithAiCache(
 }
 
 /**
- * 是否已有 AI 适配结果可展示。
+ * 是否已有适配备注可展示。
  *
  * @param l 线索
  */
@@ -230,9 +225,6 @@ async function loadProducts(): Promise<void> {
  * @param items 线索
  */
 function recoverInterruptedLeads(items: MarketingLead[]): MarketingLead[] {
-  if (aiBusy.value) {
-    return items
-  }
   return items.map((l) => {
     if (l.status === 'analyzing') {
       return {
@@ -240,7 +232,7 @@ function recoverInterruptedLeads(items: MarketingLead[]): MarketingLead[] {
         status: hasFitResult(l) ? 'analyzed' : 'pending',
         errorMessage: hasFitResult(l)
           ? ''
-          : l.errorMessage || '上次分析中断，可重新点击「AI 分析适配」',
+          : l.errorMessage || '上次分析中断，可手动填写话术后审核',
       }
     }
     if (l.status === 'scripting') {
@@ -250,7 +242,7 @@ function recoverInterruptedLeads(items: MarketingLead[]): MarketingLead[] {
         errorMessage:
           l.scriptA || l.scriptB
             ? ''
-            : l.errorMessage || '上次话术生成中断，可重新点击「AI 生成话术」',
+            : l.errorMessage || '上次话术生成中断，可手动填写话术后审核',
       }
     }
     return l
@@ -622,32 +614,6 @@ async function collectSpeakers(): Promise<void> {
 }
 
 /**
- * 开源版：云端 AI 适配已移除。
- */
-async function analyzeSelected(): Promise<void> {
-  emit('log', OSS_AI_DISABLED)
-  resultModal.value = {
-    title: 'AI 分析适配（开源版）',
-    summary: OSS_AI_DISABLED + ' 可在线索卡片中手动填写适配备注与话术后入队发送。',
-    items: [],
-    credits: 0,
-  }
-}
-
-/**
- * 开源版：云端 AI 话术已移除。
- */
-async function generateScripts(): Promise<void> {
-  emit('log', OSS_AI_DISABLED)
-  resultModal.value = {
-    title: 'AI 生成话术（开源版）',
-    summary: OSS_AI_DISABLED + ' 请在线索中手动编写 / 粘贴话术后入队发送。',
-    items: [],
-    credits: 0,
-  }
-}
-
-/**
  * 切换线索勾选。
  *
  * @param id 线索 ID
@@ -715,10 +681,11 @@ function digestLines(digest: string): string[] {
  * @param lead 线索
  * @param which A|B|custom
  */
-async function approveLead(lead: MarketingLead, which: 'A' | 'B'): Promise<void> {
-  const text = which === 'A' ? lead.scriptA : lead.scriptB
+async function approveLead(lead: MarketingLead, which: 'A' | 'B' | 'chosen'): Promise<void> {
+  const text =
+    which === 'A' ? lead.scriptA : which === 'B' ? lead.scriptB : lead.scriptChosen
   if (!text.trim()) {
-    emit('log', '话术为空')
+    emit('log', '话术为空，请先填写「最终发送文案」')
     return
   }
   try {
@@ -755,8 +722,12 @@ async function skipLead(lead: MarketingLead): Promise<void> {
  * @param text 文本
  */
 async function saveChosenScript(lead: MarketingLead, text: string): Promise<void> {
+  const next = String(text || '')
+  leads.value = leads.value.map((row) =>
+    row.id === lead.id ? { ...row, scriptChosen: next } : row,
+  )
   try {
-    await patchMarketingLead(lead.id, { scriptChosen: text })
+    await patchMarketingLead(lead.id, { scriptChosen: next })
   } catch (err) {
     emit('log', `保存话术失败：${err instanceof Error ? err.message : String(err)}`)
   }
@@ -1102,8 +1073,8 @@ onUnmounted(() => {
       <section class="block">
         <h3>活动配置</h3>
         <p class="hint">
-          流程：选产品 → 选协议号与群 → 采集发言 → AI 分析 → 生成话术 → 人工审核 →
-          按发送策略入队（后台限速发送）。开源版请手动填写话术。
+          流程：选产品 → 选协议号与群 → 采集发言 → 手动填写话术并审核 →
+          按发送策略入队（后台限速发送）。
         </p>
         <div class="grid-2">
           <div class="field">
@@ -1142,15 +1113,9 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
-        <div class="grid-2">
-          <div class="field">
-            <label>历史消息条数</label>
-            <input v-model.number="historyLimit" type="number" min="50" max="2000" step="50" />
-          </div>
-          <div class="field">
-            <label>话术最低适配分</label>
-            <input v-model.number="minFitScore" type="number" min="0" max="100" />
-          </div>
+        <div class="field">
+          <label>历史消息条数</label>
+          <input v-model.number="historyLimit" type="number" min="50" max="2000" step="50" />
         </div>
         <div class="actions">
           <button type="button" class="primary" :disabled="running" @click="collectSpeakers">
@@ -1290,37 +1255,12 @@ onUnmounted(() => {
           <button
             type="button"
             class="primary"
-            :disabled="aiBusy"
-            @click="analyzeSelected"
-          >
-            {{
-              aiBusy && aiBusyKind === 'analyze'
-                ? '分析进行中…'
-                : 'AI 分析适配（开源版不可用）'
-            }}
-          </button>
-          <button
-            type="button"
-            class="primary"
-            :disabled="aiBusy"
-            @click="generateScripts"
-          >
-            {{
-              aiBusy && aiBusyKind === 'script' ? '话术生成中…' : 'AI 生成话术（开源版不可用）'
-            }}
-          </button>
-          <button
-            type="button"
-            class="primary"
-            :disabled="running || aiBusy || enqueueBusy"
+            :disabled="running || enqueueBusy"
             @click="enqueueApproved"
           >
             {{ enqueueBusy ? '入队中…' : '加入发送队列' }}
           </button>
         </div>
-        <p v-if="aiBusy" class="hint ai-busy-hint">
-          AI 任务后台进行中，可继续浏览；结果会写入本地线索，下次进入仍可查看。
-        </p>
         <div v-if="!filteredLeads.length" class="hint">暂无线索，先采集发言。</div>
         <div v-else class="lead-list">
           <article v-for="l in filteredLeads" :key="l.id" class="lead-card">
@@ -1350,28 +1290,19 @@ onUnmounted(() => {
               </template>
               <template v-else>（无发言摘要）</template>
             </div>
-            <div v-if="l.status === 'analyzing'" class="fit-placeholder busy">
-              AI 分析中，请稍候…（可离开本页，完成后结果会保存在本地）
-            </div>
             <div
-              v-else-if="hasFitResult(l)"
+              v-if="hasFitResult(l)"
               class="fit-result"
               :class="fitTier(l.fitScore, l.fitLabel)"
             >
               <div class="fit-result-head">
-                <span class="fit-title">AI 适配结果</span>
+                <span class="fit-title">适配备注</span>
                 <span class="fit-score-pill">
                   {{ l.fitLabel || '—' }} · {{ l.fitScore }} 分
                 </span>
               </div>
               <p v-if="l.fitReasons" class="fit-reasons">{{ l.fitReasons }}</p>
               <p v-if="l.riskFlags" class="fit-risk">风险：{{ l.riskFlags }}</p>
-            </div>
-            <div v-else-if="l.status === 'pending'" class="fit-placeholder">
-              尚未 AI 分析 — 勾选后点击上方「AI 分析适配」
-            </div>
-            <div v-if="l.status === 'scripting'" class="fit-placeholder busy">
-              AI 话术生成中…
             </div>
             <div v-if="l.scriptA || l.scriptB" class="scripts">
               <div class="field">
@@ -1386,10 +1317,11 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="field script-chosen">
-              <label>最终发送文案（可改）</label>
+              <label>最终发送文案（手动填写）</label>
               <textarea
                 :value="l.scriptChosen"
-                rows="2"
+                rows="3"
+                placeholder="在此填写要发送的话术，保存后点「审核通过」"
                 @change="
                   saveChosenScript(l, ($event.target as HTMLTextAreaElement).value)
                 "
@@ -1397,6 +1329,9 @@ onUnmounted(() => {
             </div>
             <p v-if="l.errorMessage" class="meta-line warn">错误：{{ l.errorMessage }}</p>
             <div class="actions">
+              <button type="button" class="primary" @click="approveLead(l, 'chosen')">
+                审核通过
+              </button>
               <button type="button" class="ghost" @click="skipLead(l)">跳过</button>
             </div>
           </article>

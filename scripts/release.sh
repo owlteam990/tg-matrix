@@ -23,10 +23,14 @@
 #   - 本脚本只打「当前 OS」产物；Windows 请在 Win 主机执行 .\scripts\release.ps1
 #   - 日常开发热更请用 ./scripts/build.sh / restart
 
-export APPLE_SIGNING_IDENTITY='Developer ID Application: SELAMI KOCAYARRAK (9RL67B83R7)'
-export APPLE_TEAM_ID='9RL67B83R7'
+# 签名 / 公证仅通过环境变量传入（CI 开源构建请设 TG_RELEASE_SKIP_SIGN=1）
+# APPLE_SIGNING_IDENTITY / APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID
 
 set -euo pipefail
+# GitHub Actions / 非交互 CI 默认跳过签名检查
+if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
+  export TG_RELEASE_SKIP_SIGN="${TG_RELEASE_SKIP_SIGN:-1}"
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -299,9 +303,9 @@ manifest = {
     "forceUpdate": False,
     "downloadUrl": f"https://cdn.example.com/{primary}" if primary else "",
     "releaseNotes": f"TG Matrix {ver}",
-    "supportContact": "@maotouying_cc",
+    "supportContact": "https://github.com/owlteam990/tg-matrix/issues",
     "publishedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    "_note": "上传安装包到 CDN 后，把 downloadUrl 换成真实 HTTPS 直链，再写入工厂更新接口（见 docs/更新.md）",
+    "_note": "开源版请把 downloadUrl 换成 GitHub Release 资产直链",
 }
 Path(out, "update-manifest.example.json").write_text(
     json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",

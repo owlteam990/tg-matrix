@@ -101,7 +101,7 @@ const hints: Record<ModuleKey, string> = {
   groups: '已加入群按协议号缓存在本地；仅点「刷新」才请求 Telegram。支持加群/退出/邀请。',
   contacts: '通讯录按协议号缓存在本地 SQLite；仅点「刷新」才请求 Telegram。',
   scrape: '成员采集与手机号检查；结果需标注来源。',
-  marketing: '产品库 → 采集发言 → 人工填写话术 → 审核后发送。开源版不含云端 AI。',
+  marketing: '产品库 → 采集发言 → 手动填写话术 → 审核后入队发送。',
   send_queue: '汇总营销与群发明细；待发送可改文案、换协议号、按策略计算可发时间并定时发送。',
   tasks: '查看全局任务队列、进度与导出。',
   settings: '本地节奏、发送策略（营销/群发共用）与版本信息。',

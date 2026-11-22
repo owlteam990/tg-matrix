@@ -29,7 +29,8 @@
   "bundle": {
     "active": true,
     "targets": [
-      "msi"
+      "app",
+      "dmg"
     ],
     "icon": [
       "icons/tg-matrix/32x32.png",
@@ -39,7 +40,7 @@
       "icons/tg-matrix/icon.ico"
     ],
     "resources": [
-      "binaries/tg-sidecar.exe"
+      "binaries/tg-sidecar"
     ],
     "macOS": {
       "minimumSystemVersion": "12.0"

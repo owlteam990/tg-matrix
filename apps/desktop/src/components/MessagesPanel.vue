@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { OSS_AI_DISABLED } from '../lib/ossNotice'
 import {
   answerJoinChallenge,
   BULK_SEND_PRODUCT_ID,
@@ -25,20 +24,6 @@ import {
   type MarketingSendPolicy,
   type MessageMode,
 } from '../api/sidecar'
-import {
-  AUTO_SEND_COUNTDOWN_DEFAULT,
-  AUTO_SEND_COUNTDOWN_MAX,
-  AUTO_SEND_COUNTDOWN_MIN,
-  AUTO_SEND_DAILY_LIMIT,
-  AUTO_SEND_MIN_INTERVAL_MS,
-  canEnableAutoSend,
-  canEnableChatAi,
-  clampAutoSendCountdown,
-  getChatAiSession,
-  isPrivatePeer,
-  remainAutoSendDaily,
-  saveChatAiSession,
-} from '../lib/chatAi'
 import { failStopAfterForApi, loadSettings } from '../lib/settings'
 import { openExternalUrl } from '../lib/openUrl'
 
@@ -86,26 +71,6 @@ const answeringKey = ref('')
 const openLinkText = ref('')
 const openingLink = ref(false)
 
-// —— 会话 AI（P0 手动建议；P1 自动建议+群聊；P2 私聊自动发送）——
-const aiEnabled = ref(false)
-/** suggest | auto（群聊强制 suggest） */
-const aiMode = ref<'suggest' | 'auto'>('suggest')
-/** 对方新消息自动生成建议 */
-const aiAutoSuggestOnNew = ref(true)
-const aiContextLimit = ref(20)
-const aiPersona = ref('')
-const aiCountdownSec = ref(AUTO_SEND_COUNTDOWN_DEFAULT)
-const aiSettingsOpen = ref(false)
-const aiBusy = ref(false)
-const aiCandidates = ref<string[]>([])
-const aiError = ref('')
-/** 自动发送倒计时剩余秒；0=未在倒计时 */
-const aiAutoSendLeft = ref(0)
-const aiAutoSendText = ref('')
-let aiAutoSuggestTimer: ReturnType<typeof setTimeout> | null = null
-let aiAutoSendTimer: ReturnType<typeof setInterval> | null = null
-/** 自动建议防抖间隔（合并一轮轮询的多条未读） */
-const AI_AUTO_SUGGEST_DEBOUNCE_MS = 1500
 
 /** 常用表情（Unicode，与 TG 文本表情一致） */
 const EMOJI_LIST = [
@@ -116,21 +81,6 @@ const EMOJI_LIST = [
 
 const accountId = computed(() => props.selectedIds[0] || '')
 
-/** 私聊 + 群/频道可开 AI */
-const aiAvailableForDialog = computed(() => {
-  const d = activeDialog.value
-  return !!d && canEnableChatAi(d.peerType)
-})
-
-/** 当前会话是否允许自动发送 */
-const aiAutoSendAllowed = computed(() => {
-  const d = activeDialog.value
-  return !!d && canEnableAutoSend(d.peerType)
-})
-
-/** 今日剩余自动发送次数（展示用） */
-const aiRemainDaily = computed(() => remainAutoSendDaily(accountId.value))
-
 // —— 群发（多号策略 + 多文案随机，复用营销调度） ——
 const mode = ref<MessageMode>('username')
 const targetsText = ref('')
@@ -138,8 +88,6 @@ const targetsText = ref('')
 const variants = ref<string[]>([''])
 const failStopAfter = ref(5)
 const sending = ref(false)
-const aiVariantBusy = ref(false)
-const aiVariantCount = ref(5)
 const sendPolicies = ref<MarketingSendPolicy[]>([])
 const selectedPolicyId = ref('')
 const bulkJobs = ref<MarketingSendJob[]>([])
@@ -158,8 +106,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopPoll()
-  clearAiAutoSuggestTimer()
-  cancelAiAutoSend()
   stopBulkJobsPolling()
 })
 
@@ -213,198 +159,6 @@ watch(mode, () => {
   emit('log', `已切换定位方式：${mode.value}（名单已清空，正文保留）`)
 })
 
-/**
- * 清除自动建议防抖定时器。
- */
-function clearAiAutoSuggestTimer(): void {
-  if (aiAutoSuggestTimer) {
-    clearTimeout(aiAutoSuggestTimer)
-    aiAutoSuggestTimer = null
-  }
-}
-
-/**
- * 取消自动发送倒计时。
- */
-function cancelAiAutoSend(): void {
-  if (aiAutoSendTimer) {
-    clearInterval(aiAutoSendTimer)
-    aiAutoSendTimer = null
-  }
-  aiAutoSendLeft.value = 0
-  aiAutoSendText.value = ''
-}
-
-/**
- * 从本地加载当前会话 AI 开关；切换会话时清空候选，避免串上下文。
- */
-function loadAiForActiveDialog(): void {
-  clearAiAutoSuggestTimer()
-  cancelAiAutoSend()
-  aiCandidates.value = []
-  aiError.value = ''
-  aiSettingsOpen.value = false
-  const d = activeDialog.value
-  if (!accountId.value || !d) {
-    aiEnabled.value = false
-    aiMode.value = 'suggest'
-    aiAutoSuggestOnNew.value = true
-    aiContextLimit.value = 20
-    aiPersona.value = ''
-    aiCountdownSec.value = AUTO_SEND_COUNTDOWN_DEFAULT
-    return
-  }
-  const cfg = getChatAiSession(accountId.value, d.peerType, d.peerId)
-  const allow = canEnableChatAi(d.peerType)
-  aiEnabled.value = cfg.enabled && allow
-  aiMode.value =
-    cfg.mode === 'auto' && canEnableAutoSend(d.peerType) ? 'auto' : 'suggest'
-  aiAutoSuggestOnNew.value = cfg.autoSuggestOnNew !== false
-  aiContextLimit.value = cfg.contextLimit
-  aiPersona.value = cfg.persona || ''
-  aiCountdownSec.value = clampAutoSendCountdown(cfg.autoSendCountdownSec)
-}
-
-/**
- * 持久化当前会话 AI 配置。
- */
-function persistAiSession(): void {
-  const d = activeDialog.value
-  if (!accountId.value || !d) {
-    return
-  }
-  // 群聊强制 suggest
-  const mode =
-    aiMode.value === 'auto' && canEnableAutoSend(d.peerType) ? 'auto' : 'suggest'
-  if (mode !== aiMode.value) {
-    aiMode.value = mode
-  }
-  saveChatAiSession(accountId.value, d.peerType, d.peerId, {
-    enabled: aiEnabled.value,
-    mode,
-    autoSuggestOnNew: aiAutoSuggestOnNew.value,
-    contextLimit: aiContextLimit.value,
-    persona: aiPersona.value,
-    autoSendCountdownSec: clampAutoSendCountdown(aiCountdownSec.value),
-  })
-}
-
-/**
- * 切换 AI 助手开关。
- *
- * @param on 是否开启
- */
-function onToggleAi(on: boolean): void {
-  if (on && !aiAvailableForDialog.value) {
-    emit('log', '当前会话类型不支持 AI')
-    aiEnabled.value = false
-    return
-  }
-  aiEnabled.value = on
-  if (!on) {
-    aiSettingsOpen.value = false
-    clearAiAutoSuggestTimer()
-    cancelAiAutoSend()
-    aiCandidates.value = []
-  }
-  persistAiSession()
-  const kind = activeDialog.value && isPrivatePeer(activeDialog.value.peerType) ? '私聊' : '群聊'
-  emit(
-    'log',
-    on
-      ? `已开启本会话 AI 助手（${kind} · ${aiMode.value === 'auto' ? '自动发送' : '建议'}）`
-      : '已关闭本会话 AI 助手',
-  )
-}
-
-/**
- * 切换建议 / 自动发送模式。
- *
- * @param mode 目标模式
- */
-function onChangeAiMode(mode: 'suggest' | 'auto'): void {
-  if (mode === 'auto') {
-    if (!aiAutoSendAllowed.value) {
-      emit('log', '群聊禁止自动发送，仅支持建议模式')
-      aiMode.value = 'suggest'
-      persistAiSession()
-      return
-    }
-    const ok = window.confirm(
-      `确认开启「自动发送」？\n\n` +
-        `· 仅私聊生效；生成后将倒计时 ${clampAutoSendCountdown(aiCountdownSec.value)} 秒发送首条候选\n` +
-        `· 同会话间隔 ≥ ${AUTO_SEND_MIN_INTERVAL_MS / 1000} 秒；单号每日上限 ${AUTO_SEND_DAILY_LIMIT} 次\n` +
-        `· 倒计时内可取消；关闭开关或切会话会中止`,
-    )
-    if (!ok) {
-      aiMode.value = 'suggest'
-      persistAiSession()
-      return
-    }
-  }
-  aiMode.value = mode
-  if (mode !== 'auto') {
-    cancelAiAutoSend()
-  }
-  persistAiSession()
-  emit('log', mode === 'auto' ? '已切换为自动发送模式' : '已切换为建议模式')
-}
-
-/**
- * 开源版：云端 AI 回复已移除。
- *
- * @param opts.source 触发来源
- */
-async function onGenerateAiReplies(opts?: {
-  source?: 'manual' | 'auto'
-}): Promise<void> {
-  const source = opts?.source || 'manual'
-  if (source === 'auto') {
-    return
-  }
-  aiError.value = OSS_AI_DISABLED
-  emit('log', OSS_AI_DISABLED)
-}
-
-/**
- * 轮询到对方新消息后，防抖触发自动建议。
- */
-function scheduleAiAutoSuggest(): void {
-  if (!aiEnabled.value || !aiAutoSuggestOnNew.value) {
-    return
-  }
-  if (!aiAvailableForDialog.value) {
-    return
-  }
-  clearAiAutoSuggestTimer()
-  aiAutoSuggestTimer = setTimeout(() => {
-    aiAutoSuggestTimer = null
-    void onGenerateAiReplies({ source: 'auto' })
-  }, AI_AUTO_SUGGEST_DEBOUNCE_MS)
-}
-
-/**
- * 将候选填入输入框。
- *
- * @param text 候选正文
- */
-function fillAiCandidate(text: string): void {
-  cancelAiAutoSend()
-  draft.value = text
-  emit('log', '已填入 AI 建议到输入框，可编辑后发送')
-}
-
-/**
- * 直接发送某条候选（不额外扣积分）。
- *
- * @param text 候选正文
- */
-async function sendAiCandidate(text: string): Promise<void> {
-  cancelAiAutoSend()
-  draft.value = text
-  await onSendChat()
-}
-
 watch(
   () =>
     [
@@ -413,8 +167,7 @@ watch(
       activeDialog.value?.peerType,
     ] as const,
   () => {
-    loadAiForActiveDialog()
-  },
+    },
 )
 
 watch(
@@ -634,7 +387,6 @@ async function loadHistory(poll: boolean): Promise<void> {
     // P1：对方新消息 → 防抖自动出建议（合并同批未读）
     const inbound = added.some((m) => !m.out)
     if (inbound) {
-      scheduleAiAutoSuggest()
     }
   } catch (err) {
     if (!poll) {
@@ -741,7 +493,6 @@ function stopPoll(): void {
     clearInterval(pollTimer)
     pollTimer = null
   }
-  clearAiAutoSuggestTimer()
 }
 
 /**
@@ -1408,13 +1159,6 @@ function removeVariant(index: number): void {
 }
 
 /**
- * 开源版：云端 AI 文案扩写已移除。
- */
-async function onGenerateVariants(): Promise<void> {
-  emit('log', OSS_AI_DISABLED)
-}
-
-/**
  * 群发提交：多号 + 策略调度，文案随机。
  */
 async function onSend(): Promise<void> {
@@ -1538,23 +1282,6 @@ async function onSend(): Promise<void> {
           <div class="dialog-top">
             <strong>
               {{ d.title || d.username || d.peerId }}
-              <span
-                v-if="
-                  accountId &&
-                  canEnableChatAi(d.peerType) &&
-                  getChatAiSession(accountId, d.peerType, d.peerId).enabled
-                "
-                class="ai-badge"
-                :title="
-                  getChatAiSession(accountId, d.peerType, d.peerId).mode === 'auto'
-                    ? '本会话 AI · 自动发送'
-                    : '本会话已开 AI'
-                "
-              >{{
-                getChatAiSession(accountId, d.peerType, d.peerId).mode === 'auto'
-                  ? 'AI·自动'
-                  : 'AI'
-              }}</span>
             </strong>
             <span class="time">{{ formatTime(d.lastDate) }}</span>
           </div>
@@ -1577,44 +1304,6 @@ async function onSend(): Promise<void> {
             </span>
           </div>
           <div class="header-actions">
-            <label
-              class="ai-switch"
-              :class="{ on: aiEnabled, disabled: !aiAvailableForDialog }"
-              :title="
-                aiAvailableForDialog
-                  ? aiMode === 'auto'
-                    ? '本会话 AI · 自动发送'
-                    : '按会话开关 AI 助手（建议模式）'
-                  : '当前会话不支持 AI'
-              "
-            >
-              <input
-                type="checkbox"
-                :checked="aiEnabled"
-                :disabled="!aiAvailableForDialog"
-                @change="onToggleAi(($event.target as HTMLInputElement).checked)"
-              />
-              AI 助手
-              <span v-if="aiEnabled && aiMode === 'auto'" class="ai-mode-tag">自动</span>
-            </label>
-            <button
-              v-if="aiEnabled"
-              type="button"
-              class="ghost"
-              :disabled="aiBusy"
-              @click="aiSettingsOpen = !aiSettingsOpen"
-            >
-              设置
-            </button>
-            <button
-              v-if="aiEnabled"
-              type="button"
-              class="primary ai-gen"
-              :disabled="aiBusy"
-              @click="onGenerateAiReplies()"
-            >
-              {{ aiBusy ? '生成中…' : '生成回复' }}
-            </button>
             <button
               type="button"
               class="ghost"
@@ -1625,73 +1314,6 @@ async function onSend(): Promise<void> {
             </button>
           </div>
         </header>
-        <div v-if="activeDialog && aiEnabled && aiSettingsOpen" class="ai-settings">
-          <div class="field">
-            <label>模式</label>
-            <select
-              :value="aiMode"
-              @change="onChangeAiMode(($event.target as HTMLSelectElement).value as 'suggest' | 'auto')"
-            >
-              <option value="suggest">建议（人工确认）</option>
-              <option value="auto" :disabled="!aiAutoSendAllowed">
-                自动发送{{ aiAutoSendAllowed ? '' : '（仅私聊）' }}
-              </option>
-            </select>
-          </div>
-          <div class="field">
-            <label>来消息自动建议</label>
-            <label class="ai-check">
-              <input
-                v-model="aiAutoSuggestOnNew"
-                type="checkbox"
-                @change="persistAiSession"
-              />
-              开启
-            </label>
-          </div>
-          <div v-if="aiAutoSendAllowed" class="field">
-            <label>自动发送倒计时（{{ AUTO_SEND_COUNTDOWN_MIN }}–{{ AUTO_SEND_COUNTDOWN_MAX }}s）</label>
-            <input
-              v-model.number="aiCountdownSec"
-              type="number"
-              :min="AUTO_SEND_COUNTDOWN_MIN"
-              :max="AUTO_SEND_COUNTDOWN_MAX"
-              step="1"
-              @change="
-                aiCountdownSec = clampAutoSendCountdown(aiCountdownSec);
-                persistAiSession()
-              "
-            />
-          </div>
-          <div class="field">
-            <label>抓取最近条数（5–50）</label>
-            <input
-              v-model.number="aiContextLimit"
-              type="number"
-              min="5"
-              max="50"
-              step="1"
-              @change="persistAiSession"
-            />
-          </div>
-          <div class="field grow">
-            <label>人设 / 产品要点（可选）</label>
-            <input
-              v-model="aiPersona"
-              type="text"
-              placeholder="例如：简短热情，主推 XX 产品"
-              @change="persistAiSession"
-            />
-          </div>
-          <p class="ai-hint">
-            开源版不含云端 AI 生成
-            <template v-if="aiAutoSendAllowed">
-              · 自动发送间隔 ≥ {{ AUTO_SEND_MIN_INTERVAL_MS / 1000 }}s · 今日剩余
-              {{ aiRemainDaily }}/{{ AUTO_SEND_DAILY_LIMIT }}
-            </template>
-            <template v-else> · 群聊仅建议，禁止自动发送</template>
-          </p>
-        </div>
         <div v-if="activeDialog" class="open-link-bar">
           <input
             v-model="openLinkText"
@@ -1841,58 +1463,6 @@ async function onSend(): Promise<void> {
           </div>
         </div>
 
-        <div v-if="activeDialog && aiEnabled" class="ai-suggest">
-          <div class="ai-suggest-head">
-            <strong>AI 建议</strong>
-            <span class="ai-meta">
-              {{ aiMode === 'auto' ? '自动发送' : '建议' }}
-              <template v-if="aiAutoSuggestOnNew"> · 来消息自动</template>
-              · 开源版不可用
-            </span>
-            <button
-              type="button"
-              class="ghost mini"
-              :disabled="aiBusy"
-              @click="onGenerateAiReplies()"
-            >
-              {{ aiCandidates.length ? '换一批' : '生成回复' }}
-            </button>
-          </div>
-          <div v-if="aiAutoSendLeft > 0" class="ai-autosend-bar">
-            <span>
-              {{ aiAutoSendLeft }}s 后自动发送：{{
-                aiAutoSendText.length > 48
-                  ? aiAutoSendText.slice(0, 48) + '…'
-                  : aiAutoSendText
-              }}
-            </span>
-            <button type="button" class="ghost mini" @click="cancelAiAutoSend">取消</button>
-          </div>
-          <p v-if="aiError" class="ai-error">{{ aiError }}</p>
-          <div v-if="aiCandidates.length" class="ai-list">
-            <div v-for="(c, i) in aiCandidates" :key="i" class="ai-item">
-              <div class="ai-text">{{ c }}</div>
-              <div class="ai-ops">
-                <button type="button" class="ghost mini" @click="fillAiCandidate(c)">填入</button>
-                <button
-                  type="button"
-                  class="primary mini"
-                  :disabled="sendingChat || !sidecarOk"
-                  @click="sendAiCandidate(c)"
-                >
-                  发送
-                </button>
-              </div>
-            </div>
-          </div>
-          <p v-else class="ai-empty">
-            {{
-              aiAutoSuggestOnNew
-                ? '等待对方新消息将自动生成建议，也可手动点「生成回复」'
-                : '点「生成回复」基于最近对话给出 1～3 条候选'
-            }}
-          </p>
-        </div>
 
         <footer v-if="activeDialog" class="composer">
           <input
@@ -2021,7 +1591,7 @@ async function onSend(): Promise<void> {
     <!-- 群发：多号策略 + 多文案随机（内容区独立纵向滚动，不被下方任务日志挡住） -->
     <div v-else class="bulk-scroll">
       <p class="bulk-lead">
-        中栏勾选多协议号作为号池 → 选发送策略（与营销共用）→ 文案池可 AI 扩写 →
+        中栏勾选多协议号作为号池 → 选发送策略（与营销共用）→ 手动填写文案池 →
         入队后后台按策略限速，每目标随机选一条文案。
       </p>
       <div class="tabs">
@@ -2049,21 +1619,6 @@ async function onSend(): Promise<void> {
         <div class="variants-head">
           <label>文案池（{{ variantCount }} 条有效 · 发送时随机选用）</label>
           <div class="variants-ops">
-            <input
-              v-model.number="aiVariantCount"
-              type="number"
-              min="2"
-              max="30"
-              title="AI 生成条数"
-            />
-            <button
-              type="button"
-              class="ghost mini"
-              :disabled="aiVariantBusy || !sidecarOk"
-              @click="onGenerateVariants"
-            >
-              {{ aiVariantBusy ? '生成中…' : 'AI 生成变体' }}
-            </button>
             <button type="button" class="ghost mini" @click="addVariant">+ 添加</button>
           </div>
         </div>
@@ -2071,13 +1626,13 @@ async function onSend(): Promise<void> {
           <textarea
             v-model="variants[i]"
             rows="3"
-            :placeholder="i === 0 ? '种子文案 / 第 1 条（可再 AI 扩写）' : `文案 ${i + 1}`"
+            :placeholder="i === 0 ? '第 1 条文案' : `文案 ${i + 1}`"
           />
           <button type="button" class="ghost mini" title="删除" @click="removeVariant(i)">
             删
           </button>
         </div>
-        <p class="hint">开源版请手动添加多条文案轮换；建议 3～15 条降低重复感。</p>
+        <p class="hint">可手动添加多条文案轮换；建议 3～15 条降低重复感。</p>
       </div>
 
       <div class="row-fields">
@@ -2492,208 +2047,6 @@ async function onSend(): Promise<void> {
   justify-content: flex-end;
 }
 
-.ai-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  padding: 4px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.ai-switch.on {
-  color: var(--color-primary);
-  background: var(--color-bg-selected);
-  border-color: #b7d4c4;
-}
-
-.ai-switch.disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.ai-switch input {
-  margin: 0;
-}
-
-.ai-mode-tag {
-  font-size: 10px;
-  font-weight: 600;
-  color: #b45309;
-  background: #fff7ed;
-  border: 1px solid #fdba74;
-  border-radius: 999px;
-  padding: 0 6px;
-  line-height: 1.4;
-}
-
-.ai-gen {
-  padding: 6px 10px;
-  font-size: 12px;
-}
-
-.ai-settings {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: flex-end;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--color-border);
-  background: #f7faf8;
-  flex-shrink: 0;
-}
-
-.ai-settings .field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 120px;
-}
-
-.ai-settings .field.grow {
-  flex: 1;
-  min-width: 180px;
-}
-
-.ai-settings label {
-  font-size: 11px;
-  color: var(--color-text-secondary);
-}
-
-.ai-settings input,
-.ai-settings select {
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  padding: 6px 8px;
-  font: inherit;
-  font-size: 13px;
-  background: #fff;
-}
-
-.ai-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--color-text);
-  padding: 6px 0;
-  cursor: pointer;
-}
-
-.ai-check input {
-  margin: 0;
-}
-
-.ai-hint {
-  margin: 0;
-  width: 100%;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-}
-
-.ai-autosend-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 8px 0;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: #fff7ed;
-  border: 1px solid #fdba74;
-  font-size: 12px;
-  color: #9a3412;
-}
-
-.ai-suggest {
-  border-top: 1px solid var(--color-border);
-  background: #fafcfa;
-  padding: 10px 12px;
-  flex-shrink: 0;
-  max-height: 180px;
-  overflow: auto;
-}
-
-.ai-suggest-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.ai-suggest-head strong {
-  font-size: 13px;
-}
-
-.ai-meta {
-  flex: 1;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-}
-
-.ai-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ai-item {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 8px 10px;
-  background: #fff;
-}
-
-.ai-text {
-  flex: 1;
-  font-size: 13px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.ai-ops {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.mini {
-  padding: 4px 8px;
-  font-size: 12px;
-}
-
-.ai-error {
-  margin: 0 0 6px;
-  font-size: 12px;
-  color: var(--color-danger);
-}
-
-.ai-empty {
-  margin: 0;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-
-.ai-badge {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 5px;
-  font-size: 10px;
-  font-weight: 700;
-  vertical-align: middle;
-  color: var(--color-primary);
-  background: var(--color-bg-selected);
-  border-radius: 3px;
-}
 
 .chat-placeholder {
   flex: 1;

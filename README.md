@@ -22,10 +22,10 @@
 - **消息**：会话列表、历史、收发；群发支持多号策略与多文案轮换
 - **群组 / 联系人**：加退群、邀请、通讯录；已加入群与通讯录可按协议号缓存在本地
 - **采集**：群成员 / 发言者采集、手机号检查
-- **营销流水线（手工）**：产品库 → 线索 → 手动写话术 → 入队限速发送
+- **营销流水线**：产品库 → 线索 → 手动写话术 → 入队限速发送
 - **任务中心**：批量任务进度、取消、断点相关状态
 
-开源版**不含**云端 AI（适配分析 / 自动话术 / 会话 AI 回复）。相关按钮会提示自行编写文案；欢迎社区以自备模型 Key 等方式贡献扩展。
+本开源版**不包含任何远程 AI / 账号云端接口**；话术与回复均需人工编写。
 
 ## 目录
 
@@ -103,11 +103,22 @@ scripts\setup-win.cmd
 scripts\release-win.cmd
 ```
 
+## GitHub Actions 自动发版
+
+推送符合 `v*` 的 tag 后，CI 会在 **macOS** 打 `.dmg`、在 **Windows** 打 NSIS `.exe`，并上传到 GitHub Release（未做 Apple 公证 / Windows 代码签名）。
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+也可在 Actions → **Release** → Run workflow，填写已有 tag。
+
 ## 本地数据
 
 打包 App 的数据目录约在（macOS）：
 
-`~/Library/Application Support/local.tgmatrix.app`
+`~/Library/Application Support/local.tgmatrix.desktop`
 
 开发态可用仓库下 `.data/`（已在 `.gitignore` 中忽略）。
 
